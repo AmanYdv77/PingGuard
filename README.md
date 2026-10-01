@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/AmanYdv77/PingGuard/actions/workflows/ci.yml/badge.svg)](https://github.com/AmanYdv77/PingGuard/actions/workflows/ci.yml)
 
-PingGuard is a self-hosted, distributed HTTP uptime and keep-alive monitoring service built with FastAPI, PostgreSQL, Redis, and Celery.
+PingGuard is a self-hosted, distributed HTTP uptime and health monitoring service built with FastAPI, PostgreSQL, Redis, and Celery.
 
 ---
 
@@ -11,7 +11,7 @@ PingGuard is a self-hosted, distributed HTTP uptime and keep-alive monitoring se
 - **Asynchronous Control Plane**: High-throughput REST API built on FastAPI and SQLAlchemy 2.0 Async for managing monitors and viewing execution telemetry.
 - **Decoupled Distributed Probing**: Outbound HTTP checks are never executed in web requests; all probe workloads are queued to Celery workers backed by Redis.
 - **SSRF & DNS Rebinding Protection**: Target hostnames are pre-resolved and checked against private/reserved IPv4 and IPv6 CIDR blocks; connections pin the resolved IP directly to mitigate time-of-check to time-of-use (TOCTOU) DNS rebinding attacks.
-- **Configurable Keep-Alive Heartbeats**: Supports dual-mode schedules (`monitor`, `keep_alive`, `both`) to periodically ping endpoints and prevent idle cold starts on serverless platforms.
+- **Configurable Probing Schedules**: Supports periodic health check intervals to monitor endpoint uptime, validate response codes, and record latency trends.
 - **Rate Limiting & Capacity Guards**: Per-key write rate limiting prevents abuse, and a global monitor ceiling safeguards worker and database resources.
 - **Automated Data Retention**: Scheduled Celery Beat maintenance job prunes historical probe results older than a configurable retention window (default 30 days) in bounded batches.
 - **Operational Observability**: Distinct liveness (`/health`) and dependency-aware readiness (`/ready`) endpoints, correlated `X-Request-ID` tracing, and structured JSON logging.
@@ -217,7 +217,6 @@ Every application setting is typed and validated in `app/config.py` using Pydant
 | `HTTP_MAX_RESPONSE_BYTES` | `1048576` | Maximum response payload size read into memory (1 MB). Prevents memory exhaustion. |
 | `HTTP_MAX_REDIRECTS` | `5` | Maximum number of HTTP redirect hops followed before halting. |
 | `HTTP_USER_AGENT` | `PingGuard/1.0` | Outbound User-Agent header for standard uptime monitor probes. |
-| `HTTP_KEEP_ALIVE_USER_AGENT` | `PingGuard-KeepAlive/1.0`| Outbound User-Agent header for keep-alive heartbeat probes. |
 | `PROBE_TOTAL_TIMEOUT_SECONDS` | `8.0` | Hard deadline for entire probe execution across DNS, TLS, redirects, and streaming. |
 | `CELERY_SOFT_TIME_LIMIT` | `10` | Worker soft execution limit in seconds. Must be `>= probe_total_timeout_seconds + 2`. |
 | `CELERY_HARD_TIME_LIMIT` | `15` | Worker hard execution limit in seconds. Must be `>= celery_soft_time_limit + 3`. |
@@ -241,7 +240,7 @@ All `/monitors` endpoints require authentication via the `X-API-Key` HTTP header
 | `POST` | `/monitors/` | `X-API-Key` | Register a new monitor endpoint. Subject to monitor capacity limit (`409 Conflict`). |
 | `GET` | `/monitors/` | `X-API-Key` | List registered monitors with offset (`skip`) and pagination (`limit`). |
 | `GET` | `/monitors/{id}` | `X-API-Key` | Retrieve monitor definition, current status, and scheduling metadata. |
-| `PATCH`| `/monitors/{id}` | `X-API-Key` | Partially update monitor configuration, intervals, or keep-alive parameters. |
+| `PATCH`| `/monitors/{id}` | `X-API-Key` | Partially update monitor configuration, URLs, or check intervals. |
 | `PUT` | `/monitors/{id}` | `X-API-Key` | Update monitor configuration. |
 | `DELETE`| `/monitors/{id}` | `X-API-Key` | Delete monitor and automatically cascade delete all associated probe results. |
 | `GET` | `/monitors/{id}/results` | `X-API-Key` | Retrieve historical probe results with optional `check_type` filtering. |
@@ -300,7 +299,7 @@ pingguard/
 │   ├── security.py                 # Constant-time API key verification
 │   ├── ssrf.py                     # IP blocklists, validation & credential redaction
 │   ├── status.py                   # Outcome-to-status & HTTP code classification
-│   ├── tasks.py                    # Celery tasks (probe, keep-alive, retention)
+│   ├── tasks.py                    # Celery tasks (probe execution, data retention)
 │   ├── urls.py                     # URL normalization and safe joining
 │   └── worker.py                   # Celery application & Celery Beat schedule
 ├── tests/
