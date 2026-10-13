@@ -3,8 +3,8 @@ Distributed Task Definitions.
 
 Defines Celery background tasks:
 - `execute_ping`: HTTP health probe, latency recording, and monitor status updates.
-- `execute_keep_alive`: Lightweight activity request intended to wake/touch idle services.
-- `sweep_due_monitors`: Periodic scheduler sweep dispatching due health and keep-alive checks.
+- `sweep_due_monitors`: Periodic scheduler sweep dispatching due health checks.
+- `prune_ping_results`: Retention pruning of old telemetry data.
 """
 
 import logging
@@ -18,11 +18,10 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db import get_sync_db
-from app.enums import MonitorMode, PingOutcome
+from app.enums import PingOutcome
 from app.models import Monitor, PingResult
 from app.net import (
     PingResultDTO,
-    robust_keep_alive,
     robust_ping,
 )
 from app.status import outcome_to_status
@@ -71,35 +70,25 @@ def _run_probe_task(
     monitor_id: int,
     *,
     probe: Callable[[Monitor], PingResultDTO],
-    check_type: str,
-    update_monitor_status: bool = False,
-    gatekeeper: Callable[[Monitor], tuple[bool, str]] | None = None,
+    check_type: str = "monitor",
+    update_monitor_status: bool = True,
 ) -> dict[str, Any]:
     """
     Shared core execution harness for Celery network probe tasks.
-    Handles DB session lifecycle, gatekeeper checks, probe execution, telemetry persistence,
+    Handles DB session lifecycle, probe execution, telemetry persistence,
     status updates, exponential backoff retries, and soft time limit recovery.
     """
-    action_name = "keep_alive" if check_type == "keep_alive" else "ping"
-    task_label = f"execute_{action_name}"
-    display_name = "Keep-alive" if check_type == "keep_alive" else "Ping"
-    logger.info("Starting %s monitor_id=%s", action_name, monitor_id)
+    logger.info("Starting ping monitor_id=%s", monitor_id)
 
     try:
         with get_sync_db() as session:
             monitor = session.get(Monitor, monitor_id)
             if monitor is None:
-                logger.warning("Monitor not found for %s monitor_id=%s", task_label, monitor_id)
+                logger.warning("Monitor not found for execute_ping monitor_id=%s", monitor_id)
                 return {"status": "not_found", "monitor_id": monitor_id}
 
-            if gatekeeper is not None:
-                allowed, reason = gatekeeper(monitor)
-                if not allowed:
-                    logger.info("Keep-alive skipped monitor_id=%s reason=%s", monitor_id, reason)
-                    return {"status": "skipped", "reason": reason, "monitor_id": monitor_id}
-
             if not monitor.url:
-                logger.error("%s failed monitor_id=%s reason=missing_url", display_name, monitor_id)
+                logger.error("Ping failed monitor_id=%s reason=missing_url", monitor_id)
                 return {"status": "error", "reason": "missing_url", "monitor_id": monitor_id}
 
             now = datetime.now(UTC)
@@ -121,8 +110,7 @@ def _run_probe_task(
             )
 
             logger.info(
-                "%s completed monitor_id=%s outcome=%s status_code=%s latency_ms=%s error=%s",
-                display_name,
+                "Ping completed monitor_id=%s outcome=%s status_code=%s latency_ms=%s error=%s",
                 monitor_id,
                 dto.outcome.value,
                 dto.status_code,
@@ -132,18 +120,9 @@ def _run_probe_task(
 
             if dto.error_detail in TRANSIENT_ERRORS and task.request.retries < task.max_retries:
                 countdown = 2**task.request.retries
-                if check_type == "monitor":
-                    retry_log = (
-                        "Transient network error on monitor_id=%s (%s). "
-                        "Retrying in %ss (attempt %s/%s)..."
-                    )
-                else:
-                    retry_log = (
-                        "Transient network error in keep-alive for monitor_id=%s (%s). "
-                        "Retrying in %ss (attempt %s/%s)..."
-                    )
                 logger.warning(
-                    retry_log,
+                    "Transient network error on monitor_id=%s (%s). "
+                    "Retrying in %ss (attempt %s/%s)...",
                     monitor_id,
                     dto.error_detail,
                     countdown,
@@ -164,7 +143,7 @@ def _run_probe_task(
             }
 
     except SoftTimeLimitExceeded:
-        logger.error("Soft time limit exceeded in %s for monitor_id=%s", task_label, monitor_id)
+        logger.error("Soft time limit exceeded in execute_ping for monitor_id=%s", monitor_id)
         now = datetime.now(UTC)
         with get_sync_db() as recovery_session:
             mon = recovery_session.get(Monitor, monitor_id)
@@ -219,32 +198,6 @@ def execute_ping(self, monitor_id: int) -> dict[str, Any]:
     )
 
 
-@celery_app.task(
-    bind=True,
-    name="app.tasks.execute_keep_alive",
-    max_retries=3,
-    default_retry_delay=2,
-)
-def execute_keep_alive(self, monitor_id: int) -> dict[str, Any]:
-    """
-    Executes an optional lightweight Keep-Alive activity ping for the specified monitor.
-
-    - Uses shared `robust_keep_alive` powered by httpx.AsyncClient.
-    - Sends activity request to `url + keep_alive_path`.
-    - Persists result to 'ping_results' with check_type='keep_alive'.
-    - Strictly preserves Monitor.status unchanged (health status belongs only to execute_ping).
-    - Retries only transient network errors; never retries SSRF rejections.
-    """
-    return _run_probe_task(
-        self,
-        monitor_id,
-        probe=lambda m: robust_keep_alive(m.url, m.keep_alive_path),
-        check_type="keep_alive",
-        update_monitor_status=False,
-        gatekeeper=lambda m: (m.keep_alive_enabled, "keep_alive_disabled"),
-    )
-
-
 # =========================================================================
 # Celery Beat Periodic Scheduling Heartbeat
 # =========================================================================
@@ -287,12 +240,6 @@ def sweep_due_monitors(
     )
 
     monitors_enqueued = 0
-    keep_alives_enqueued = 0
-
-    # -------------------------------------------------------------------------
-    # 1. Health Monitoring Due Sweep (Claim-Commit-then-Dispatch)
-    # -------------------------------------------------------------------------
-    monitoring_modes = [MonitorMode.MONITOR.value, MonitorMode.MONITOR_AND_KEEP_ALIVE.value]
 
     for _ in range(m_batches):
         batch_items: list[tuple[int, int]] = []
@@ -300,7 +247,6 @@ def sweep_due_monitors(
             due_monitors = (
                 session.query(Monitor)
                 .filter(
-                    Monitor.mode.in_(monitoring_modes),
                     Monitor.next_check_at <= now,
                 )
                 .order_by(Monitor.next_check_at.asc())
@@ -349,87 +295,12 @@ def sweep_due_monitors(
                 logger.critical("Failed to reset schedule during broker recovery: %s", rec_exc)
             break
 
-    # -------------------------------------------------------------------------
-    # 2. Keep-Alive Activity Due Sweep (Claim-Commit-then-Dispatch)
-    # -------------------------------------------------------------------------
-    keep_alive_modes = [MonitorMode.KEEP_ALIVE.value, MonitorMode.MONITOR_AND_KEEP_ALIVE.value]
-
-    for _ in range(m_batches):
-        batch_ka_items: list[tuple[int, int]] = []
-        with get_sync_db() as session:
-            due_keep_alives = (
-                session.query(Monitor)
-                .filter(
-                    Monitor.keep_alive_enabled.is_(True),
-                    Monitor.mode.in_(keep_alive_modes),
-                    Monitor.next_keep_alive_at <= now,
-                )
-                .order_by(Monitor.next_keep_alive_at.asc())
-                .limit(b_size)
-                .with_for_update(skip_locked=True)
-                .all()
-            )
-            if not due_keep_alives:
-                break
-
-            for monitor in due_keep_alives:
-                if not monitor.keep_alive_enabled or not monitor.keep_alive_interval_seconds:
-                    logger.warning(
-                        "Keep-alive skipped monitor_id=%s reason=invalid_or_disabled_configuration",
-                        monitor.id,
-                    )
-                    continue
-
-                monitor.next_keep_alive_at = now + timedelta(
-                    seconds=monitor.keep_alive_interval_seconds
-                )
-                batch_ka_items.append((monitor.id, monitor.keep_alive_interval_seconds))
-
-            session.commit()
-
-        failed_ka_ids: list[int] = []
-        for idx, (m_id, interval) in enumerate(batch_ka_items):
-            try:
-                execute_keep_alive.apply_async(args=[m_id], expires=interval)
-                keep_alives_enqueued += 1
-                logger.info(
-                    "Enqueued execute_keep_alive monitor_id=%s with expires=%s", m_id, interval
-                )
-            except Exception as exc:
-                logger.error(
-                    "Failed to enqueue execute_keep_alive monitor_id=%s: %s. Broker may be down.",
-                    m_id,
-                    exc,
-                )
-                failed_ka_ids = [item[0] for item in batch_ka_items[idx:]]
-                break
-
-        if failed_ka_ids:
-            try:
-                with get_sync_db() as recovery_session:
-                    recovery_session.query(Monitor).filter(Monitor.id.in_(failed_ka_ids)).update(
-                        {Monitor.next_keep_alive_at: now},
-                        synchronize_session=False,
-                    )
-                    recovery_session.commit()
-                logger.info(
-                    "Reset next_keep_alive_at to now for %d keep-alives due to broker error",
-                    len(failed_ka_ids),
-                )
-            except Exception as rec_exc:
-                logger.critical(
-                    "Failed to reset keep-alive schedule during broker recovery: %s", rec_exc
-                )
-            break
-
     logger.info(
-        "Scheduler sweep completed. Enqueued %d health pings, %d keep-alive requests.",
+        "Scheduler sweep completed. Enqueued %d health pings.",
         monitors_enqueued,
-        keep_alives_enqueued,
     )
     return {
         "monitors_enqueued": monitors_enqueued,
-        "keep_alives_enqueued": keep_alives_enqueued,
     }
 
 

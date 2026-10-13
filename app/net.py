@@ -28,7 +28,6 @@ from app.ssrf import (
     redact_url_credentials,
 )
 from app.status import classify_status_code
-from app.urls import safe_join_url
 
 logger = logging.getLogger(__name__)
 
@@ -577,34 +576,6 @@ def robust_ping(
         perform_http_probe(
             url=url,
             user_agent=settings.http_user_agent,
-            allow_loopback=allow_loopback,
-            transport=transport,
-            dns_resolver=dns_resolver,
-            total_timeout=total_timeout,
-        )
-    )
-
-
-def robust_keep_alive(
-    url: str,
-    path: str | None = None,
-    allow_loopback: bool = False,
-    transport: httpx.AsyncBaseTransport | None = None,
-    dns_resolver: Callable[..., Any] | None = None,
-    total_timeout: float | None = None,
-) -> PingResultDTO:
-    """
-    Synchronous bridge for Celery workers to execute a Keep-Alive activity ping.
-
-    Safely joins url + path and executes using the Keep-Alive User-Agent.
-    """
-    target_url = safe_join_url(url, path)
-    settings = get_settings()
-
-    return asyncio.run(
-        perform_http_probe(
-            url=target_url,
-            user_agent=settings.http_keep_alive_user_agent,
             allow_loopback=allow_loopback,
             transport=transport,
             dns_resolver=dns_resolver,

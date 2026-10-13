@@ -15,7 +15,6 @@ from app.enums import PingOutcome
 from app.net import (
     perform_http_probe,
     redact_url_credentials,
-    robust_keep_alive,
     robust_ping,
 )
 
@@ -279,35 +278,6 @@ def test_credential_redaction() -> None:
     assert "SuperSecretPassword123" not in redacted
     assert "***:***" in redacted
     assert redacted == "https://***:***@api.example.com/v1/health"
-
-
-# =========================================================================
-# 8. Keep-Alive Integration Tests
-# =========================================================================
-def test_robust_keep_alive_success() -> None:
-    """Verify robust_keep_alive uses keep_alive_path and distinct User-Agent."""
-    called_headers: dict[str, str] = {}
-    called_url: str = ""
-
-    def keep_alive_handler(request: httpx.Request) -> httpx.Response:
-        nonlocal called_headers, called_url
-        called_headers = dict(request.headers)
-        called_url = str(request.url)
-        return httpx.Response(200, text='{"status":"alive"}')
-
-    transport = httpx.MockTransport(keep_alive_handler)
-    result = robust_keep_alive(
-        "https://example.com",
-        path="/healthz",
-        allow_loopback=True,
-        transport=transport,
-    )
-    assert result.outcome == PingOutcome.UP
-    assert result.status_code == 200
-    assert result.final_url == "https://example.com/healthz"
-    assert called_url.endswith("/healthz")
-    assert called_headers.get("host") == "example.com"
-    assert called_headers.get("user-agent") == "PingGuard-KeepAlive/1.0"
 
 
 def test_nat64_translation_validation() -> None:
