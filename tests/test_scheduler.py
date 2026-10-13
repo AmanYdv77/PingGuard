@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import redis
 from app.db import SyncSessionLocal, get_sync_db
-from app.enums import MonitorMode, MonitorStatus
+from app.enums import MonitorStatus
 from app.models import Monitor
 from app.tasks import sweep_due_monitors
 from app.worker import celery_app
@@ -17,12 +17,7 @@ def _create_test_monitor(
     name: str = "Test Scheduler Monitor",
     url: str = "https://example.com",
     check_interval_seconds: int = 60,
-    mode: str = "monitor",
     next_check_at: datetime | None = None,
-    keep_alive_enabled: bool = False,
-    keep_alive_interval_seconds: int | None = None,
-    keep_alive_path: str | None = None,
-    next_keep_alive_at: datetime | None = None,
 ) -> int:
     """Helper to synchronously seed a Monitor into PostgreSQL."""
     with get_sync_db() as session:
@@ -31,12 +26,7 @@ def _create_test_monitor(
             url=url,
             check_interval_seconds=check_interval_seconds,
             status=MonitorStatus.PENDING.value,
-            mode=mode,
             next_check_at=next_check_at,
-            keep_alive_enabled=keep_alive_enabled,
-            keep_alive_interval_seconds=keep_alive_interval_seconds,
-            keep_alive_path=keep_alive_path,
-            next_keep_alive_at=next_keep_alive_at,
         )
         session.add(monitor)
         session.flush()
@@ -64,9 +54,7 @@ def test_sweep_monitoring_due(mock_ping_async: MagicMock) -> None:
     past_time = now - timedelta(seconds=10)
     mid = _create_test_monitor(
         check_interval_seconds=60,
-        mode=MonitorMode.MONITOR.value,
         next_check_at=past_time,
-        keep_alive_enabled=False,
     )
 
     res = sweep_due_monitors()
@@ -90,9 +78,7 @@ def test_sweep_enqueues_with_task_expiration(mock_ping_async: MagicMock) -> None
     past_time = now - timedelta(seconds=10)
     mid = _create_test_monitor(
         check_interval_seconds=60,
-        mode=MonitorMode.MONITOR.value,
         next_check_at=past_time,
-        keep_alive_enabled=False,
     )
 
     res = sweep_due_monitors()
@@ -107,7 +93,6 @@ def test_sweep_skip_locked_concurrency() -> None:
     now = datetime.now(UTC)
     past_time = now - timedelta(seconds=20)
     mid = _create_test_monitor(
-        mode=MonitorMode.MONITOR.value,
         next_check_at=past_time,
     )
 
@@ -147,7 +132,6 @@ def test_sweep_missed_schedules_no_catchup_storm(mock_async: MagicMock) -> None:
     three_hours_ago = now - timedelta(hours=3)
     mid = _create_test_monitor(
         check_interval_seconds=60,
-        mode=MonitorMode.MONITOR.value,
         next_check_at=three_hours_ago,
     )
 
@@ -178,7 +162,6 @@ def test_sweep_redis_failure_recovers_schedule_to_now(mock_async: MagicMock) -> 
     past_time = now - timedelta(seconds=30)
     mid = _create_test_monitor(
         check_interval_seconds=60,
-        mode=MonitorMode.MONITOR.value,
         next_check_at=past_time,
     )
 
@@ -230,7 +213,6 @@ def test_sweep_idle_no_monitors_due() -> None:
     """Verify clean idle run when no monitors are due."""
     now = datetime.now(UTC)
     _create_test_monitor(
-        mode=MonitorMode.MONITOR.value,
         next_check_at=now + timedelta(hours=1),
     )
 

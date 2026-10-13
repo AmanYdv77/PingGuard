@@ -16,9 +16,6 @@ from app.worker import celery_app
 def _create_test_monitor(
     name: str = "Test Target",
     url: str = "https://example.com",
-    mode: str = "monitor",
-    keep_alive_enabled: bool = False,
-    keep_alive_path: str | None = None,
 ) -> int:
     """Helper to synchronously seed a Monitor into PostgreSQL."""
     with get_sync_db() as session:
@@ -27,12 +24,7 @@ def _create_test_monitor(
             url=url,
             check_interval_seconds=60,
             status=MonitorStatus.PENDING.value,
-            mode=mode,
-            keep_alive_enabled=keep_alive_enabled,
-            keep_alive_interval_seconds=300 if keep_alive_enabled else None,
-            keep_alive_path=keep_alive_path,
             next_check_at=datetime.now(UTC),
-            next_keep_alive_at=datetime.now(UTC) if keep_alive_enabled else None,
         )
         session.add(monitor)
         session.flush()
@@ -61,7 +53,6 @@ def test_execute_ping_success(mock_ping: MagicMock) -> None:
     result = execute_ping(mid)
     assert result["status"] == "completed"
     assert result["monitor_id"] == mid
-    assert result["check_type"] == "monitor"
     assert result["status_code"] == 200
     assert result["error"] is None
     assert result["latency_ms"] > 0
@@ -75,7 +66,6 @@ def test_execute_ping_success(mock_ping: MagicMock) -> None:
 
         pr = session.query(PingResult).filter_by(monitor_id=mid).first()
         assert pr is not None
-        assert pr.check_type == "monitor"
         assert pr.status_code == 200
         assert pr.error is None
 
@@ -182,8 +172,6 @@ def test_task_idempotency_multiple_executions(mock_ping: MagicMock) -> None:
 
         results = session.query(PingResult).filter_by(monitor_id=mid).all()
         assert len(results) == 2
-        for r in results:
-            assert r.check_type == "monitor"
 
 
 @patch("app.tasks.robust_ping")
@@ -211,7 +199,6 @@ def test_celery_delay_eager_execution(mock_ping: MagicMock) -> None:
         assert async_ping.ready()
         ping_res = async_ping.get()
         assert ping_res["status"] == "completed"
-        assert ping_res["check_type"] == "monitor"
     finally:
         celery_app.conf.task_always_eager = False
 
@@ -239,5 +226,4 @@ def test_execute_ping_soft_time_limit_exceeded(mock_ping: MagicMock) -> None:
 
         pr = session.query(PingResult).filter_by(monitor_id=mid).first()
         assert pr is not None
-        assert pr.check_type == "monitor"
         assert pr.error == "task_soft_time_limit"

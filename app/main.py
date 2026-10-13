@@ -32,7 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import __version__
 from app.config import get_settings
 from app.db import engine, get_db
-from app.enums import MonitorMode, MonitorStatus
+from app.enums import MonitorStatus
 from app.logging_config import REQUEST_ID_REGEX, configure_logging, request_id_var
 from app.models import Monitor, PingResult
 from app.ratelimit import rate_limit_write
@@ -42,7 +42,6 @@ from app.schemas import (
     MonitorRead,
     MonitorUpdate,
     PingResultRead,
-    validate_keep_alive_rules,
 )
 from app.security import require_api_key
 from app.tasks import execute_ping
@@ -231,11 +230,6 @@ async def create_monitor(
         status=MonitorStatus.PENDING.value,
         last_checked_at=None,
         next_check_at=now,
-        mode=payload.mode.value,
-        keep_alive_enabled=payload.keep_alive_enabled,
-        keep_alive_interval_seconds=payload.keep_alive_interval_seconds,
-        keep_alive_path=payload.keep_alive_path,
-        next_keep_alive_at=now if payload.keep_alive_enabled else None,
     )
     db.add(monitor)
     await db.commit()
@@ -247,10 +241,7 @@ async def create_monitor(
     "/{monitor_id}",
     response_model=MonitorRead,
     summary="Get monitor by ID",
-    description=(
-        "Retrieves configuration, status, and keep-alive settings "
-        "for a single monitor from PostgreSQL."
-    ),
+    description="Retrieves configuration and status for a single monitor from PostgreSQL.",
 )
 async def get_monitor(
     monitor_id: Annotated[int, Path(..., description="The unique integer ID of the monitor", ge=1)],
@@ -310,45 +301,10 @@ async def update_monitor(
         )
 
     update_data = payload.model_dump(exclude_unset=True)
-
-    # Handle keep_alive_enabled=False reset logic
-    if "keep_alive_enabled" in update_data and update_data["keep_alive_enabled"] is False:
-        if "keep_alive_interval_seconds" not in update_data:
-            update_data["keep_alive_interval_seconds"] = None
-        if "keep_alive_path" not in update_data:
-            update_data["keep_alive_path"] = None
-        if "mode" not in update_data and monitor.mode != MonitorMode.MONITOR.value:
-            update_data["mode"] = MonitorMode.MONITOR.value
-
-    # Compute merged state for consistency validation
-    target_mode = MonitorMode(update_data.get("mode", monitor.mode))
-    target_keep_alive = update_data.get("keep_alive_enabled", monitor.keep_alive_enabled)
-    target_interval = update_data.get(
-        "keep_alive_interval_seconds", monitor.keep_alive_interval_seconds
-    )
-    target_path = update_data.get("keep_alive_path", monitor.keep_alive_path)
-
-    try:
-        validate_keep_alive_rules(
-            mode=target_mode,
-            keep_alive_enabled=target_keep_alive,
-            keep_alive_interval_seconds=target_interval,
-            keep_alive_path=target_path,
-        )
-    except ValueError as err:
-        raise HTTPException(status_code=422, detail=str(err)) from err
-
-    # Apply updates
     for key, value in update_data.items():
         if hasattr(monitor, key):
             val_to_set = value.value if isinstance(value, Enum) else value
             setattr(monitor, key, val_to_set)
-
-    # Maintain next_keep_alive_at synchronization
-    if monitor.keep_alive_enabled and monitor.next_keep_alive_at is None:
-        monitor.next_keep_alive_at = datetime.now(UTC)
-    elif not monitor.keep_alive_enabled:
-        monitor.next_keep_alive_at = None
 
     await db.commit()
     await db.refresh(monitor)
@@ -414,12 +370,9 @@ async def get_monitor_results(
     monitor_id: Annotated[int, Path(..., description="The unique integer ID of the monitor", ge=1)],
     db: Annotated[AsyncSession, Depends(get_db)],
     limit: Annotated[int, Query(description="Maximum results to return", ge=1, le=500)] = 50,
-    check_type: Annotated[
-        str | None, Query(description="Filter by check_type ('monitor' or 'keep_alive')")
-    ] = None,
 ) -> list[PingResultRead]:
     """
-    Retrieves probe and keep-alive execution telemetry for charting and auditing.
+    Retrieves probe execution telemetry for charting and auditing.
     """
     monitor = await db.get(Monitor, monitor_id)
     if monitor is None:
@@ -427,10 +380,12 @@ async def get_monitor_results(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Monitor not found",
         )
-    stmt = select(PingResult).where(PingResult.monitor_id == monitor_id)
-    if check_type:
-        stmt = stmt.where(PingResult.check_type == check_type)
-    stmt = stmt.order_by(PingResult.checked_at.desc()).limit(limit)
+    stmt = (
+        select(PingResult)
+        .where(PingResult.monitor_id == monitor_id)
+        .order_by(PingResult.checked_at.desc())
+        .limit(limit)
+    )
     res = await db.execute(stmt)
     return [PingResultRead.model_validate(r) for r in res.scalars().all()]
 

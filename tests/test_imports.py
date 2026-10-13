@@ -87,9 +87,9 @@ def test_ssrf_module_exists():
 
 
 def test_enums_pure_module_exists():
-    """Verify app/enums.py exists and exports MonitorStatus, MonitorMode, PingOutcome."""
-    from app.enums import MonitorMode, MonitorStatus, PingOutcome
+    """Verify app/enums.py exists and exports MonitorStatus and PingOutcome."""
+    import app.enums as enums
 
-    assert issubclass(MonitorMode, str)
-    assert issubclass(MonitorStatus, str)
-    assert issubclass(PingOutcome, str)
+    assert not hasattr(enums, "MonitorMode")
+    assert issubclass(enums.MonitorStatus, str)
+    assert issubclass(enums.PingOutcome, str)
