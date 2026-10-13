@@ -43,7 +43,6 @@ TRANSIENT_ERRORS: tuple[str, ...] = (
 def save_ping_result(
     session: Session,
     monitor_id: int,
-    check_type: str,
     status_code: int | None,
     latency_ms: float | None,
     error: str | None,
@@ -51,11 +50,9 @@ def save_ping_result(
 ) -> PingResult:
     """
     Persists a telemetry result row to the database.
-    Used by both regular health checks and wake-up keep-alive operations.
     """
     result = PingResult(
         monitor_id=monitor_id,
-        check_type=check_type,
         status_code=status_code,
         latency_ms=latency_ms,
         error=error,
@@ -70,7 +67,6 @@ def _run_probe_task(
     monitor_id: int,
     *,
     probe: Callable[[Monitor], PingResultDTO],
-    check_type: str = "monitor",
     update_monitor_status: bool = True,
 ) -> dict[str, Any]:
     """
@@ -102,7 +98,6 @@ def _run_probe_task(
             save_ping_result(
                 session=session,
                 monitor_id=monitor_id,
-                check_type=check_type,
                 status_code=dto.status_code,
                 latency_ms=dto.latency_ms,
                 error=dto.error_detail,
@@ -134,7 +129,6 @@ def _run_probe_task(
             return {
                 "status": "completed",
                 "monitor_id": monitor_id,
-                "check_type": check_type,
                 "outcome": dto.outcome.value,
                 "status_code": dto.status_code,
                 "latency_ms": dto.latency_ms,
@@ -153,7 +147,6 @@ def _run_probe_task(
             save_ping_result(
                 session=recovery_session,
                 monitor_id=monitor_id,
-                check_type=check_type,
                 status_code=None,
                 latency_ms=None,
                 error="task_soft_time_limit",
@@ -162,7 +155,6 @@ def _run_probe_task(
         return {
             "status": "completed",
             "monitor_id": monitor_id,
-            "check_type": check_type,
             "outcome": PingOutcome.DOWN.value,
             "status_code": None,
             "latency_ms": None,
@@ -193,7 +185,6 @@ def execute_ping(self, monitor_id: int) -> dict[str, Any]:
         self,
         monitor_id,
         probe=lambda m: robust_ping(m.url),
-        check_type="monitor",
         update_monitor_status=True,
     )
 

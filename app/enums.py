@@ -21,18 +21,6 @@ class MonitorStatus(StrEnum):
     PENDING = "pending"
 
 
-class MonitorMode(StrEnum):
-    """
-    Execution mode controlling scheduler eligibility and check behaviors.
-
-    Persisted to PostgreSQL 'monitors.mode' with CHECK constraint ck_monitors_mode.
-    """
-
-    MONITOR = "monitor"
-    KEEP_ALIVE = "keep_alive"
-    MONITOR_AND_KEEP_ALIVE = "monitor_and_keep_alive"
-
-
 class PingOutcome(StrEnum):
     """
     Classification outcome returned by the network prober.

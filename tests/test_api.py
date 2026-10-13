@@ -88,11 +88,11 @@ def test_create_monitor_valid_and_backward_compatible(auth_client: TestClient) -
     assert data["last_checked_at"] is None
     assert data["next_check_at"] is not None
 
-    # Verify new fields default correctly
-    assert data["mode"] == "monitor"
-    assert data["keep_alive_enabled"] is False
-    assert data["keep_alive_interval_seconds"] is None
-    assert data["keep_alive_path"] is None
+    # Verify keep-alive fields are NOT present
+    assert "mode" not in data
+    assert "keep_alive_enabled" not in data
+    assert "keep_alive_interval_seconds" not in data
+    assert "keep_alive_path" not in data
 
 
 def test_create_monitor_custom_interval(auth_client: TestClient) -> None:
@@ -108,183 +108,14 @@ def test_create_monitor_custom_interval(auth_client: TestClient) -> None:
     assert data["check_interval_seconds"] == 30
 
 
-def test_create_monitor_with_keep_alive(auth_client: TestClient) -> None:
-    """Full Monitor + Keep-Alive configuration succeeds."""
-    payload = {
-        "name": "XYZ Website",
-        "url": "https://xyz.com",
-        "check_interval_seconds": 60,
-        "mode": "monitor_and_keep_alive",
-        "keep_alive_enabled": True,
-        "keep_alive_interval_seconds": 600,
-        "keep_alive_path": "/health",
-    }
-    response = auth_client.post("/monitors/", json=payload)
-    assert response.status_code == 201
-    data = response.json()
-
-    assert data["mode"] == "monitor_and_keep_alive"
-    assert data["keep_alive_enabled"] is True
-    assert data["keep_alive_interval_seconds"] == 600
-    assert data["keep_alive_path"] == "/health"
-
-
-def test_create_keep_alive_only_mode(auth_client: TestClient) -> None:
-    """Verify mode='keep_alive' registers successfully."""
-    payload = {
-        "name": "Worker Node",
-        "url": "https://worker.internal.net",
-        "mode": "keep_alive",
-        "keep_alive_enabled": True,
-        "keep_alive_interval_seconds": 300,
-        "keep_alive_path": "/ping",
-    }
-    response = auth_client.post("/monitors/", json=payload)
-    assert response.status_code == 201
-    data = response.json()
-    assert data["mode"] == "keep_alive"
-    assert data["keep_alive_enabled"] is True
-    assert data["keep_alive_interval_seconds"] == 300
-
-
-# =========================================================================
-# Keep-Alive Interval & Path Validation
-# =========================================================================
-def test_keep_alive_enabled_without_interval_fails(auth_client: TestClient) -> None:
-    """keep_alive_enabled=True without keep_alive_interval_seconds fails with 422."""
-    payload = {
-        "name": "Incomplete KeepAlive",
-        "url": "https://example.com",
-        "mode": "keep_alive",
-        "keep_alive_enabled": True,
-        "keep_alive_interval_seconds": None,
-    }
-    response = auth_client.post("/monitors/", json=payload)
-    assert response.status_code == 422
-
-
-def test_keep_alive_interval_below_minimum(auth_client: TestClient) -> None:
-    """keep_alive_interval_seconds < 15 must return HTTP 422."""
-    payload = {
-        "name": "Too Rapid",
-        "url": "https://example.com",
-        "mode": "keep_alive",
-        "keep_alive_enabled": True,
-        "keep_alive_interval_seconds": 10,
-    }
-    response = auth_client.post("/monitors/", json=payload)
-    assert response.status_code == 422
-
-
-def test_keep_alive_interval_above_maximum(auth_client: TestClient) -> None:
-    """keep_alive_interval_seconds > 86400 must return HTTP 422."""
-    payload = {
-        "name": "Too Slow",
-        "url": "https://example.com",
-        "mode": "keep_alive",
-        "keep_alive_enabled": True,
-        "keep_alive_interval_seconds": 90000,
-    }
-    response = auth_client.post("/monitors/", json=payload)
-    assert response.status_code == 422
-
-
-def test_keep_alive_disabled_with_interval_rejected(auth_client: TestClient) -> None:
-    """Inconsistent configuration: keep_alive_enabled=False with interval must return 422."""
-    payload = {
-        "name": "Inconsistent",
-        "url": "https://example.com",
-        "mode": "monitor",
-        "keep_alive_enabled": False,
-        "keep_alive_interval_seconds": 600,
-    }
-    response = auth_client.post("/monitors/", json=payload)
-    assert response.status_code == 422
-
-
-def test_keep_alive_path_valid(auth_client: TestClient) -> None:
-    """Keep-alive path starting with '/' works."""
-    valid_paths = ["/health", "/", "/api/v1/ping", "/healthcheck"]
-    for p in valid_paths:
-        payload = {
-            "name": "Path Test",
-            "url": "https://example.com",
-            "mode": "keep_alive",
-            "keep_alive_enabled": True,
-            "keep_alive_interval_seconds": 60,
-            "keep_alive_path": p,
-        }
-        response = auth_client.post("/monitors/", json=payload)
-        assert response.status_code == 201, f"Failed for valid path {p}"
-        assert response.json()["keep_alive_path"] == p
-
-
-def test_keep_alive_path_absolute_url_fails(auth_client: TestClient) -> None:
-    """Keep-alive path as absolute URL or missing leading slash fails with 422."""
-    invalid_paths = [
-        "https://abc.com",
-        "http://other-site.com/health",
-        "//malicious-redirect.com",
-        "health",
-        "just-path",
-    ]
-    for p in invalid_paths:
-        payload = {
-            "name": "Invalid Path Test",
-            "url": "https://example.com",
-            "mode": "keep_alive",
-            "keep_alive_enabled": True,
-            "keep_alive_interval_seconds": 60,
-            "keep_alive_path": p,
-        }
-        response = auth_client.post("/monitors/", json=payload)
-        assert response.status_code == 422, f"Expected 422 for invalid path {p}"
-
-
-def test_monitor_only_explicit_false(auth_client: TestClient) -> None:
-    """Monitor-only mode with keep_alive_enabled=false explicitly works."""
-    payload = {
-        "name": "Explicit Monitor Only",
-        "url": "https://example.com",
-        "mode": "monitor",
-        "keep_alive_enabled": False,
-        "keep_alive_interval_seconds": None,
-        "keep_alive_path": None,
-    }
-    response = auth_client.post("/monitors/", json=payload)
-    assert response.status_code == 201
-    data = response.json()
-    assert data["mode"] == "monitor"
-    assert data["keep_alive_enabled"] is False
-
-
-def test_monitor_mode_with_keep_alive_enabled_true_fails(auth_client: TestClient) -> None:
-    """mode='monitor' with keep_alive_enabled=True is inconsistent and must return 422."""
-    payload = {
-        "name": "Conflict Test",
-        "url": "https://example.com",
-        "mode": "monitor",
-        "keep_alive_enabled": True,
-        "keep_alive_interval_seconds": 60,
-    }
-    response = auth_client.post("/monitors/", json=payload)
-    assert response.status_code == 422
-
-
-# =========================================================================
-# Read, Update & Delete Endpoints
-# =========================================================================
-def test_get_returns_all_new_fields(auth_client: TestClient) -> None:
-    """GET /monitors/{id} returns all keep-alive and mode fields."""
+def test_get_returns_all_monitor_fields(auth_client: TestClient) -> None:
+    """GET /monitors/{id} returns all expected monitor fields without keep-alive fields."""
     create_resp = auth_client.post(
         "/monitors/",
         json={
             "name": "Inspectable Monitor",
             "url": "https://example.com",
-            "mode": "monitor_and_keep_alive",
-            "keep_alive_enabled": True,
-            "keep_alive_interval_seconds": 120,
-            "keep_alive_path": "/healthz",
+            "check_interval_seconds": 120,
         },
     )
     created_id = create_resp.json()["id"]
@@ -292,50 +123,36 @@ def test_get_returns_all_new_fields(auth_client: TestClient) -> None:
     get_resp = auth_client.get(f"/monitors/{created_id}")
     assert get_resp.status_code == 200
     data = get_resp.json()
-    assert data["mode"] == "monitor_and_keep_alive"
-    assert data["keep_alive_enabled"] is True
-    assert data["keep_alive_interval_seconds"] == 120
-    assert data["keep_alive_path"] == "/healthz"
+    assert data["name"] == "Inspectable Monitor"
+    assert data["url"] == "https://example.com/"
+    assert data["check_interval_seconds"] == 120
+    assert "mode" not in data
+    assert "keep_alive_enabled" not in data
+    assert "keep_alive_interval_seconds" not in data
+    assert "keep_alive_path" not in data
 
 
-def test_update_modify_keep_alive_configuration(auth_client: TestClient) -> None:
-    """PATCH /monitors/{id} can enable, modify, or disable keep-alive settings."""
+def test_update_monitor_configuration(auth_client: TestClient) -> None:
+    """PATCH /monitors/{id} updates monitor configuration."""
     # 1. Create standard monitor
     create_resp = auth_client.post(
         "/monitors/", json={"name": "Updatable", "url": "https://example.com"}
     )
     mid = create_resp.json()["id"]
 
-    # 2. Update to enable keep-alive
+    # 2. Update name and interval
     patch_resp = auth_client.patch(
         f"/monitors/{mid}",
         json={
-            "mode": "monitor_and_keep_alive",
-            "keep_alive_enabled": True,
-            "keep_alive_interval_seconds": 180,
-            "keep_alive_path": "/ping",
+            "name": "Updated Name",
+            "check_interval_seconds": 180,
         },
     )
     assert patch_resp.status_code == 200
     data = patch_resp.json()
-    assert data["mode"] == "monitor_and_keep_alive"
-    assert data["keep_alive_enabled"] is True
-    assert data["keep_alive_interval_seconds"] == 180
-    assert data["keep_alive_path"] == "/ping"
-
-    # 3. Incomplete update fails (keep_alive_enabled=True without interval)
-    bad_patch = auth_client.patch(
-        f"/monitors/{mid}", json={"keep_alive_enabled": True, "keep_alive_interval_seconds": None}
-    )
-    assert bad_patch.status_code == 422
-
-    # 4. Disable keep-alive
-    disable_resp = auth_client.patch(f"/monitors/{mid}", json={"keep_alive_enabled": False})
-    assert disable_resp.status_code == 200
-    dis_data = disable_resp.json()
-    assert dis_data["keep_alive_enabled"] is False
-    assert dis_data["keep_alive_interval_seconds"] is None
-    assert dis_data["mode"] == "monitor"
+    assert data["name"] == "Updated Name"
+    assert data["check_interval_seconds"] == 180
+    assert "mode" not in data
 
 
 def test_get_unknown_monitor_returns_404(auth_client: TestClient) -> None:
@@ -405,55 +222,42 @@ def test_creating_monitor_never_probes_network(auth_client: TestClient) -> None:
             json={
                 "name": "Air-Gapped Isolation Test",
                 "url": "https://example.com",
-                "mode": "monitor_and_keep_alive",
-                "keep_alive_enabled": True,
-                "keep_alive_interval_seconds": 300,
-                "keep_alive_path": "/health",
             },
         )
         assert response.status_code == 201
 
 
-def test_list_monitors_includes_keep_alive(auth_client: TestClient) -> None:
-    """Verify list endpoint includes keep-alive attributes."""
+def test_list_monitors_returns_monitors(auth_client: TestClient) -> None:
+    """Verify list endpoint returns created monitors without keep-alive fields."""
     auth_client.post("/monitors/", json={"name": "M1", "url": "https://m1.com"})
-    auth_client.post(
-        "/monitors/",
-        json={
-            "name": "M2",
-            "url": "https://m2.com",
-            "mode": "keep_alive",
-            "keep_alive_enabled": True,
-            "keep_alive_interval_seconds": 60,
-        },
-    )
+    auth_client.post("/monitors/", json={"name": "M2", "url": "https://m2.com"})
     response = auth_client.get("/monitors/")
     assert response.status_code == 200
     data = response.json()
     assert len(data) == 2
-    assert data[0]["keep_alive_enabled"] is False
-    assert data[1]["keep_alive_enabled"] is True
+    for m in data:
+        assert "mode" not in m
+        assert "keep_alive_enabled" not in m
 
 
-def test_openapi_schema_exposes_new_models(client: TestClient) -> None:
-    """Verify /openapi.json exposes MonitorMode enum and new fields."""
+def test_openapi_schema_does_not_expose_removed_models(client: TestClient) -> None:
+    """Verify /openapi.json does not expose removed keep-alive models or fields."""
     response = client.get("/openapi.json")
     assert response.status_code == 200
     schema = response.json()
 
     schemas = schema.get("components", {}).get("schemas", {})
-    assert "MonitorMode" in schemas
-    assert schemas["MonitorMode"]["enum"] == ["monitor", "keep_alive", "monitor_and_keep_alive"]
+    assert "MonitorMode" not in schemas
 
     create_props = schemas["MonitorCreate"]["properties"]
-    assert "mode" in create_props
-    assert "keep_alive_enabled" in create_props
-    assert "keep_alive_interval_seconds" in create_props
-    assert "keep_alive_path" in create_props
+    assert "mode" not in create_props
+    assert "keep_alive_enabled" not in create_props
+    assert "keep_alive_interval_seconds" not in create_props
+    assert "keep_alive_path" not in create_props
 
 
-def test_update_monitor_put_keep_alive(auth_client: TestClient) -> None:
-    """Verify PUT endpoint works symmetrically with keep-alive configurations."""
+def test_update_monitor_put(auth_client: TestClient) -> None:
+    """Verify PUT endpoint works symmetrically with monitor configurations."""
     create_resp = auth_client.post(
         "/monitors/", json={"name": "Initial", "url": "https://example.com"}
     )
@@ -463,18 +267,15 @@ def test_update_monitor_put_keep_alive(auth_client: TestClient) -> None:
         f"/monitors/{mid}",
         json={
             "name": "PUT Updated",
-            "mode": "keep_alive",
-            "keep_alive_enabled": True,
-            "keep_alive_interval_seconds": 120,
-            "keep_alive_path": "/status",
+            "url": "https://example.com/updated",
+            "check_interval_seconds": 120,
         },
     )
     assert put_resp.status_code == 200
     data = put_resp.json()
     assert data["name"] == "PUT Updated"
-    assert data["mode"] == "keep_alive"
-    assert data["keep_alive_enabled"] is True
-    assert data["keep_alive_interval_seconds"] == 120
+    assert data["check_interval_seconds"] == 120
+    assert "mode" not in data
 
 
 def test_list_monitors_pagination(auth_client: TestClient) -> None:
@@ -492,19 +293,15 @@ def test_list_monitors_pagination(auth_client: TestClient) -> None:
 # =========================================================================
 # Persistence, Restart & ORM Relationships
 # =========================================================================
-def test_keep_alive_fields_persisted_in_postgresql(auth_client: TestClient, db_session) -> None:
+def test_monitor_fields_persisted_in_postgresql(auth_client: TestClient, db_session) -> None:
     """
-    Verify Monitor with Keep-Alive configuration is persisted
-    durably in PostgreSQL with exact column values and next_keep_alive_at timestamp.
+    Verify Monitor configuration is persisted
+    durably in PostgreSQL with exact column values and next_check_at timestamp.
     """
     payload = {
         "name": "XYZ Website",
         "url": "https://xyz.com",
         "check_interval_seconds": 60,
-        "mode": "monitor_and_keep_alive",
-        "keep_alive_enabled": True,
-        "keep_alive_interval_seconds": 600,
-        "keep_alive_path": "/health",
     }
     create_resp = auth_client.post("/monitors/", json=payload)
     assert create_resp.status_code == 201
@@ -515,27 +312,19 @@ def test_keep_alive_fields_persisted_in_postgresql(auth_client: TestClient, db_s
     assert mon.name == "XYZ Website"
     assert mon.url == "https://xyz.com/"
     assert mon.check_interval_seconds == 60
-    assert mon.mode == "monitor_and_keep_alive"
-    assert mon.keep_alive_enabled is True
-    assert mon.keep_alive_interval_seconds == 600
-    assert mon.keep_alive_path == "/health"
-    assert mon.next_keep_alive_at is not None
+    assert mon.next_check_at is not None
 
 
 def test_persistence_across_app_restart(auth_client: TestClient) -> None:
     """
-    Verify monitor and Keep-Alive data survive
+    Verify monitor data survives
     a complete FastAPI application teardown and restart.
     """
-    # 1. Create monitor with Keep-Alive in session 1
+    # 1. Create monitor in session 1
     payload = {
         "name": "Durable Monitor",
         "url": "https://durable.example.com",
         "check_interval_seconds": 90,
-        "mode": "monitor_and_keep_alive",
-        "keep_alive_enabled": True,
-        "keep_alive_interval_seconds": 450,
-        "keep_alive_path": "/alive",
     }
     res1 = auth_client.post("/monitors/", json=payload)
     assert res1.status_code == 201
@@ -559,47 +348,38 @@ def test_persistence_across_app_restart(auth_client: TestClient) -> None:
     assert data["name"] == "Durable Monitor"
     assert data["url"] == "https://durable.example.com/"
     assert data["check_interval_seconds"] == 90
-    assert data["mode"] == "monitor_and_keep_alive"
-    assert data["keep_alive_enabled"] is True
-    assert data["keep_alive_interval_seconds"] == 450
-    assert data["keep_alive_path"] == "/alive"
+    assert "mode" not in data
 
 
-def test_ping_result_orm_relationship_both_check_types(db_session) -> None:
+def test_ping_result_orm_relationship(db_session) -> None:
     """
     Verify PingResult ORM model and relationship to Monitor.
-    Confirms both 'monitor' and 'keep_alive' check types can belong to the same Monitor.
     """
     monitor = Monitor(
         name="Relationship Test Monitor",
         url="https://rel.example.com",
         check_interval_seconds=60,
-        mode="monitor_and_keep_alive",
-        keep_alive_enabled=True,
-        keep_alive_interval_seconds=300,
     )
     db_session.add(monitor)
     db_session.flush()
     mid = monitor.id
 
     now = datetime.now(UTC)
-    pr_monitor = PingResult(
+    pr1 = PingResult(
         monitor_id=mid,
-        check_type="monitor",
         status_code=200,
         latency_ms=120.0,
         error=None,
         checked_at=now,
     )
-    pr_keep_alive = PingResult(
+    pr2 = PingResult(
         monitor_id=mid,
-        check_type="keep_alive",
         status_code=200,
         latency_ms=85.5,
         error=None,
         checked_at=now,
     )
-    db_session.add_all([pr_monitor, pr_keep_alive])
+    db_session.add_all([pr1, pr2])
     db_session.commit()
 
     results = (
@@ -609,9 +389,7 @@ def test_ping_result_orm_relationship_both_check_types(db_session) -> None:
         .all()
     )
     assert len(results) == 2
-    assert results[0].check_type == "monitor"
     assert results[0].latency_ms == 120.0
-    assert results[1].check_type == "keep_alive"
     assert results[1].latency_ms == 85.5
 
 
@@ -631,7 +409,6 @@ def test_cascade_delete_monitor_and_ping_results(db_session) -> None:
 
     pr = PingResult(
         monitor_id=mid,
-        check_type="monitor",
         status_code=200,
         latency_ms=99.0,
         checked_at=datetime.now(UTC),
@@ -1143,35 +920,6 @@ def test_create_monitor_validation_errors(auth_client: TestClient) -> None:
         == 422
     )
 
-    # Keep-alive inconsistencies
-    assert (
-        auth_client.post(
-            "/monitors/",
-            json={
-                "name": "NoInterval",
-                "url": "https://example.com",
-                "mode": "keep_alive",
-                "keep_alive_enabled": True,
-                "keep_alive_interval_seconds": None,
-            },
-        ).status_code
-        == 422
-    )
-
-    assert (
-        auth_client.post(
-            "/monitors/",
-            json={
-                "name": "LowKA",
-                "url": "https://example.com",
-                "mode": "keep_alive",
-                "keep_alive_enabled": True,
-                "keep_alive_interval_seconds": 14,
-            },
-        ).status_code
-        == 422
-    )
-
 
 def test_patch_monitor_partial_updates(auth_client: TestClient) -> None:
     """Verify PATCH /monitors/{id} updates only specified fields and leaves others untouched."""
@@ -1200,21 +948,7 @@ def test_patch_monitor_partial_updates(auth_client: TestClient) -> None:
     assert r_int.json()["name"] == "Updated Name"
     assert r_int.json()["check_interval_seconds"] == 120
 
-    # 3. Update keep-alive configuration
-    r_ka = auth_client.patch(
-        f"/monitors/{mid}",
-        json={
-            "mode": "monitor_and_keep_alive",
-            "keep_alive_enabled": True,
-            "keep_alive_interval_seconds": 300,
-        },
-    )
-    assert r_ka.status_code == 200
-    assert r_ka.json()["mode"] == "monitor_and_keep_alive"
-    assert r_ka.json()["keep_alive_enabled"] is True
-    assert r_ka.json()["keep_alive_interval_seconds"] == 300
-
-    # 4. Patch non-existent monitor -> 404
+    # 3. Patch non-existent monitor -> 404
     r_404 = auth_client.patch("/monitors/999999", json={"name": "Ghost"})
     assert r_404.status_code == 404
     assert r_404.json() == {"detail": "Monitor not found"}
@@ -1243,7 +977,6 @@ def test_delete_monitor_cascade_deletes_ping_results_api(
         db_session.add(
             PingResult(
                 monitor_id=mid,
-                check_type="monitor",
                 status_code=200,
                 latency_ms=25.0 + i,
                 checked_at=now,
@@ -1284,7 +1017,6 @@ def test_get_monitor_results_pagination_bounds(auth_client: TestClient, db_sessi
         db_session.add(
             PingResult(
                 monitor_id=mid,
-                check_type="monitor",
                 status_code=200,
                 latency_ms=10.0 + i,
                 checked_at=now,

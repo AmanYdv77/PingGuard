@@ -15,7 +15,6 @@ def seed_ping_result(session, monitor_id: int, checked_at: datetime) -> int:
     """Helper to insert a ping_result directly into the test database."""
     res = PingResult(
         monitor_id=monitor_id,
-        check_type="monitor",
         status_code=200,
         latency_ms=10.0,
         checked_at=checked_at,

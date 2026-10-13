@@ -7,7 +7,6 @@ Defines the relational schema for Monitor configurations and PingResult logs.
 from datetime import UTC, datetime
 
 from sqlalchemy import (
-    Boolean,
     CheckConstraint,
     DateTime,
     Float,
@@ -18,7 +17,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
-from app.enums import MonitorMode, MonitorStatus
+from app.enums import MonitorStatus
 
 
 class Base(DeclarativeBase):
@@ -53,15 +52,6 @@ class Monitor(Base):
         DateTime(timezone=True), nullable=True, index=True
     )
 
-    # Optional Keep-Alive configuration
-    mode: Mapped[str] = mapped_column(String(30), default=MonitorMode.MONITOR.value, nullable=False)
-    keep_alive_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    keep_alive_interval_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    keep_alive_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    next_keep_alive_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, index=True
-    )
-
     # Relationship to telemetry logs with cascade deletion
     results: Mapped[list["PingResult"]] = relationship(
         "PingResult",
@@ -74,10 +64,6 @@ class Monitor(Base):
         CheckConstraint(
             "status IN ('up', 'degraded', 'down', 'pending')",
             name="ck_monitors_status",
-        ),
-        CheckConstraint(
-            "mode IN ('monitor', 'keep_alive', 'monitor_and_keep_alive')",
-            name="ck_monitors_mode",
         ),
     )
 
@@ -98,12 +84,6 @@ class PingResult(Base):
         ForeignKey("monitors.id", ondelete="CASCADE"),
         nullable=False,
     )
-    check_type: Mapped[str] = mapped_column(
-        String(20),
-        default="monitor",
-        nullable=False,
-        comment="'monitor' for health checks, 'keep_alive' for wake-up pings",
-    )
     status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
     latency_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
     error: Mapped[str | None] = mapped_column(String(500), nullable=True)
@@ -117,10 +97,4 @@ class PingResult(Base):
     # Back-reference to parent monitor
     monitor: Mapped[Monitor] = relationship("Monitor", back_populates="results")
 
-    __table_args__ = (
-        Index("idx_ping_results_monitor_checked", "monitor_id", "checked_at"),
-        CheckConstraint(
-            "check_type IN ('monitor', 'keep_alive')",
-            name="ck_ping_results_check_type",
-        ),
-    )
+    __table_args__ = (Index("idx_ping_results_monitor_checked", "monitor_id", "checked_at"),)
