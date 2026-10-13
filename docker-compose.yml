@@ -111,7 +111,7 @@ services:
           memory: 512M
 
   # ----------------------------------------------------------------------------
-  # 4. Celery Worker (Network Probing & Keep-Alive Fleet)
+  # 4. Celery Worker (Network Probing Fleet)
   # ----------------------------------------------------------------------------
   worker:
     build:

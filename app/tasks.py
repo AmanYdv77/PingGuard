@@ -207,7 +207,7 @@ def sweep_due_monitors(
     """
     Celery Beat Scheduling Heartbeat.
 
-    Decides WHEN health probes and keep-alive activities are due and enqueues them.
+    Decides WHEN health probes are due and enqueues them.
     Adheres strictly to the PingGuard architectural separation:
     - Beat/Sweep decides WHEN to check.
     - Celery Workers decide HOW to check.
@@ -217,7 +217,6 @@ def sweep_due_monitors(
     - Advance-and-commit BEFORE enqueueing to prevent duplicates.
     - Task expiration passed to apply_async (expires=interval) to discard stale tasks.
     - Automatic broker-error recovery: resets next_check_at to now in a new transaction.
-    - Two independent schedules: monitoring (next_check_at) and keep-alive (next_keep_alive_at).
     """
     settings = get_settings()
     b_size = batch_size if batch_size is not None else settings.sweep_batch_size

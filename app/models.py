@@ -30,8 +30,7 @@ class Monitor(Base):
     """
     Durable configuration and state for an endpoint monitor.
 
-    Stores user-configured polling schedules, optional keep-alive parameters,
-    and future scheduler tick timestamps (next_check_at, next_keep_alive_at).
+    Stores user-configured polling schedules and future scheduler tick timestamps (next_check_at).
     """
 
     __tablename__ = "monitors"
@@ -70,10 +69,7 @@ class Monitor(Base):
 
 class PingResult(Base):
     """
-    Historical execution record for a single probe or keep-alive check.
-
-    Distinguishes normal health probes from keep-alive activity attempts
-    via the `check_type` column.
+    Historical execution record for a single probe check.
     """
 
     __tablename__ = "ping_results"

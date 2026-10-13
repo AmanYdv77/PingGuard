@@ -69,10 +69,9 @@ def test_version_consistency() -> None:
 # =========================================================================
 def test_create_monitor_valid_and_backward_compatible(auth_client: TestClient) -> None:
     """
-    Old request format without new fields works with exact defaults.
+    Standard monitor creation request format works with exact defaults.
     Payload: {"name": "t", "url": "https://example.com"}
-    Expected: 201 Created, check_interval_seconds=60, mode='monitor',
-              keep_alive_enabled=false, keep_alive_interval_seconds=null, keep_alive_path=null.
+    Expected: 201 Created, check_interval_seconds=60, default status PENDING.
     """
     payload = {"name": "t", "url": "https://example.com"}
     response = auth_client.post("/monitors/", json=payload)
@@ -883,8 +882,8 @@ def test_monitor_cap_enforced(auth_client: TestClient) -> None:
 # =========================================================================
 def test_create_monitor_validation_errors(auth_client: TestClient) -> None:
     """
-    Verify POST /monitors returns HTTP 422 for invalid schemes,
-    missing keep-alive intervals, and out-of-range intervals.
+    Verify POST /monitors returns HTTP 422 for invalid schemes
+    and out-of-range intervals.
     """
     # Invalid schemes
     assert (
