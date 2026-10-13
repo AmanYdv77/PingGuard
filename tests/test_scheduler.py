@@ -58,8 +58,7 @@ def test_beat_schedule_configuration() -> None:
 
 
 @patch("app.tasks.execute_ping.apply_async")
-@patch("app.tasks.execute_keep_alive.apply_async")
-def test_sweep_monitoring_due(mock_ka_async: MagicMock, mock_ping_async: MagicMock) -> None:
+def test_sweep_monitoring_due(mock_ping_async: MagicMock) -> None:
     """Verify overdue monitor triggers execute_ping and advances next_check_at."""
     now = datetime.now(UTC)
     past_time = now - timedelta(seconds=10)
@@ -71,11 +70,10 @@ def test_sweep_monitoring_due(mock_ka_async: MagicMock, mock_ping_async: MagicMo
     )
 
     res = sweep_due_monitors()
-    assert res["monitors_enqueued"] == 1
-    assert res["keep_alives_enqueued"] == 0
+    assert res == {"monitors_enqueued": 1}
+    assert "keep_alives_enqueued" not in res
 
     mock_ping_async.assert_called_once_with(args=[mid], expires=60)
-    mock_ka_async.assert_not_called()
 
     with get_sync_db() as session:
         mon = session.get(Monitor, mid)
@@ -86,10 +84,7 @@ def test_sweep_monitoring_due(mock_ka_async: MagicMock, mock_ping_async: MagicMo
 
 
 @patch("app.tasks.execute_ping.apply_async")
-@patch("app.tasks.execute_keep_alive.apply_async")
-def test_sweep_enqueues_with_task_expiration(
-    mock_ka_async: MagicMock, mock_ping_async: MagicMock
-) -> None:
+def test_sweep_enqueues_with_task_expiration(mock_ping_async: MagicMock) -> None:
     """Verify Celery Beat dispatches with apply_async and passes expires=check_interval_seconds."""
     now = datetime.now(UTC)
     past_time = now - timedelta(seconds=10)
@@ -103,123 +98,6 @@ def test_sweep_enqueues_with_task_expiration(
     res = sweep_due_monitors()
     assert res["monitors_enqueued"] == 1
     mock_ping_async.assert_called_once_with(args=[mid], expires=60)
-    mock_ka_async.assert_not_called()
-
-
-@patch("app.tasks.execute_ping.apply_async")
-@patch("app.tasks.execute_keep_alive.apply_async")
-def test_sweep_keep_alive_due(mock_ka_async: MagicMock, mock_ping_async: MagicMock) -> None:
-    """Verify overdue keep-alive triggers execute_keep_alive and advances next_keep_alive_at."""
-    now = datetime.now(UTC)
-    past_time = now - timedelta(seconds=15)
-    mid = _create_test_monitor(
-        mode=MonitorMode.KEEP_ALIVE.value,
-        keep_alive_enabled=True,
-        keep_alive_interval_seconds=300,
-        keep_alive_path="/ping",
-        next_keep_alive_at=past_time,
-    )
-
-    res = sweep_due_monitors()
-    assert res["monitors_enqueued"] == 0
-    assert res["keep_alives_enqueued"] == 1
-
-    mock_ka_async.assert_called_once_with(args=[mid], expires=300)
-    mock_ping_async.assert_not_called()
-
-    with get_sync_db() as session:
-        mon = session.get(Monitor, mid)
-        assert mon.next_keep_alive_at is not None
-        assert mon.next_keep_alive_at > now
-        diff = (mon.next_keep_alive_at - now).total_seconds()
-        assert abs(diff - 300.0) <= 5.0
-
-
-@patch("app.tasks.execute_ping.apply_async")
-@patch("app.tasks.execute_keep_alive.apply_async")
-def test_sweep_dual_mode_both_due(mock_ka_async: MagicMock, mock_ping_async: MagicMock) -> None:
-    """Verify monitor_and_keep_alive mode independently triggers both tasks when both are due."""
-    now = datetime.now(UTC)
-    past_time = now - timedelta(seconds=5)
-    mid = _create_test_monitor(
-        check_interval_seconds=45,
-        mode=MonitorMode.MONITOR_AND_KEEP_ALIVE.value,
-        next_check_at=past_time,
-        keep_alive_enabled=True,
-        keep_alive_interval_seconds=180,
-        keep_alive_path="/health",
-        next_keep_alive_at=past_time,
-    )
-
-    res = sweep_due_monitors()
-    assert res["monitors_enqueued"] == 1
-    assert res["keep_alives_enqueued"] == 1
-
-    mock_ping_async.assert_called_once_with(args=[mid], expires=45)
-    mock_ka_async.assert_called_once_with(args=[mid], expires=180)
-
-    with get_sync_db() as session:
-        mon = session.get(Monitor, mid)
-        assert abs((mon.next_check_at - now).total_seconds() - 45.0) <= 5.0
-        assert abs((mon.next_keep_alive_at - now).total_seconds() - 180.0) <= 5.0
-
-
-@patch("app.tasks.execute_ping.apply_async")
-@patch("app.tasks.execute_keep_alive.apply_async")
-def test_sweep_dual_mode_independent_timing(
-    mock_ka_async: MagicMock, mock_ping_async: MagicMock
-) -> None:
-    """Verify only the overdue schedule triggers when intervals differ."""
-    now = datetime.now(UTC)
-    past_time = now - timedelta(seconds=10)
-    future_time = now + timedelta(seconds=200)
-
-    mid = _create_test_monitor(
-        check_interval_seconds=60,
-        mode=MonitorMode.MONITOR_AND_KEEP_ALIVE.value,
-        next_check_at=past_time,  # DUE
-        keep_alive_enabled=True,
-        keep_alive_interval_seconds=300,
-        keep_alive_path="/health",
-        next_keep_alive_at=future_time,  # NOT DUE
-    )
-
-    res = sweep_due_monitors()
-    assert res["monitors_enqueued"] == 1
-    assert res["keep_alives_enqueued"] == 0
-
-    mock_ping_async.assert_called_once_with(args=[mid], expires=60)
-    mock_ka_async.assert_not_called()
-
-    with get_sync_db() as session:
-        mon = session.get(Monitor, mid)
-        assert abs((mon.next_check_at - now).total_seconds() - 60.0) <= 5.0
-        assert mon.next_keep_alive_at == future_time
-
-
-@patch("app.tasks.execute_ping.apply_async")
-@patch("app.tasks.execute_keep_alive.apply_async")
-def test_sweep_keep_alive_disabled_never_enqueued(
-    mock_ka_async: MagicMock, mock_ping_async: MagicMock
-) -> None:
-    """
-    Gatekeeper: If keep_alive_enabled=False, never enqueue keep-alive even if timestamp is past.
-    """
-    now = datetime.now(UTC)
-    past_time = now - timedelta(seconds=50)
-
-    _create_test_monitor(
-        mode=MonitorMode.MONITOR.value,
-        next_check_at=now + timedelta(seconds=600),  # Not due
-        keep_alive_enabled=False,
-        next_keep_alive_at=past_time,  # Past timestamp
-    )
-
-    res = sweep_due_monitors()
-    assert res["monitors_enqueued"] == 0
-    assert res["keep_alives_enqueued"] == 0
-    mock_ka_async.assert_not_called()
-    mock_ping_async.assert_not_called()
 
 
 def test_sweep_skip_locked_concurrency() -> None:
@@ -357,5 +235,12 @@ def test_sweep_idle_no_monitors_due() -> None:
     )
 
     res = sweep_due_monitors()
-    assert res["monitors_enqueued"] == 0
-    assert res["keep_alives_enqueued"] == 0
+    assert res == {"monitors_enqueued": 0}
+    assert "keep_alives_enqueued" not in res
+
+
+def test_execute_keep_alive_task_removed() -> None:
+    """Verify execute_keep_alive task is deleted from app.tasks."""
+    import app.tasks as tasks
+
+    assert not hasattr(tasks, "execute_keep_alive")

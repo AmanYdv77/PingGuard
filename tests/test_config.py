@@ -25,7 +25,6 @@ def test_import_and_defaults(monkeypatch):
     assert settings.http_max_response_bytes == 1048576
     assert settings.http_max_redirects == 5
     assert settings.http_user_agent == "PingGuard/1.0"
-    assert settings.http_keep_alive_user_agent == "PingGuard-KeepAlive/1.0"
 
 
 def test_env_var_overrides(monkeypatch):

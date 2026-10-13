@@ -79,13 +79,6 @@ def test_schemas_does_not_import_net():
                 assert "app.net" not in alias.name, "app.schemas must not import app.net"
 
 
-def test_urls_pure_module_exists():
-    """Verify app/urls.py exists and safe_join_url can be imported."""
-    from app.urls import safe_join_url
-
-    assert callable(safe_join_url)
-
-
 def test_ssrf_module_exists():
     """Verify app/ssrf.py exists and exports is_ip_blocked."""
     from app.ssrf import is_ip_blocked

@@ -60,7 +60,6 @@ class Settings(BaseSettings):
     http_max_response_bytes: int = 1048576
     http_max_redirects: int = 5
     http_user_agent: str = "PingGuard/1.0"
-    http_keep_alive_user_agent: str = "PingGuard-KeepAlive/1.0"
 
     # 5. Probe Total Deadline & Celery Task Time Limits
     probe_total_timeout_seconds: float = 8.0
