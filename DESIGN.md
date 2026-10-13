@@ -2,7 +2,7 @@
 
 ## 1. What problem this solves
 
-PingGuard provides lightweight uptime and keep-alive monitoring for web services. Developers deploying on platforms that spin down on idle (like Render or Cloud Run) need a way to track uptime and send periodic requests to prevent cold starts. PingGuard handles this safely with a decoupled API and background worker fleet.
+PingGuard provides lightweight uptime and health monitoring for web services. Developers deploying web applications need a reliable, SSRF-safe way to track uptime, measure latency, and detect outages without freezing API threads or risking server-side request forgery. PingGuard handles this safely with a decoupled API and background worker fleet.
 
 ## 2. Architecture in one paragraph
 

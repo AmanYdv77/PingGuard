@@ -62,10 +62,7 @@ app = FastAPI(
     description=(
         "Distributed Uptime Monitoring System.\n\n"
         "Provides non-blocking endpoints backed durably by PostgreSQL via SQLAlchemy 2.0 Async.\n"
-        "Manages monitor definitions, scheduling states, and optional keep-alive parameters.\n\n"
-        "**Note on Keep-Alive:** Keep-alive activity sends periodic lightweight requests "
-        "to reduce idle sleeping on platforms that spin down. It is an optional activity attempt, "
-        "not a provider-level guarantee of permanent uptime."
+        "Manages monitor definitions and scheduling states."
     ),
     version=__version__,
     docs_url="/docs",
@@ -195,8 +192,7 @@ router = APIRouter(
     dependencies=[Depends(rate_limit_write)],
     summary="Create a new monitor",
     description=(
-        "Validates and persists a new monitor endpoint in PostgreSQL with "
-        "optional keep-alive settings. "
+        "Validates and persists a new monitor endpoint in PostgreSQL. "
         "Initial status is set to PENDING. No outbound network probe is performed in this request."
     ),
 )
@@ -205,10 +201,9 @@ async def create_monitor(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> MonitorRead:
     """
-    Asynchronously registers a target URL for monitoring and/or keep-alive in PostgreSQL.
+    Asynchronously registers a target URL for monitoring in PostgreSQL.
 
     - Validates payload via MonitorCreate schema.
-    - Enforces keep-alive configuration consistency.
     - Persists durable row in the 'monitors' table with auto-generated ID.
     - Initializes status to PENDING and marks next_check_at as due immediately.
     - Returns serialized MonitorRead.
@@ -266,20 +261,14 @@ async def get_monitor(
     response_model=MonitorRead,
     dependencies=[Depends(rate_limit_write)],
     summary="Update monitor (Partial)",
-    description=(
-        "Partially updates an existing monitor's name, check interval, "
-        "or keep-alive configuration in PostgreSQL."
-    ),
+    description=("Partially updates an existing monitor's name or check interval in PostgreSQL."),
 )
 @router.put(
     "/{monitor_id}",
     response_model=MonitorRead,
     dependencies=[Depends(rate_limit_write)],
     summary="Update monitor",
-    description=(
-        "Updates an existing monitor's configuration, including "
-        "keep-alive parameters in PostgreSQL."
-    ),
+    description=("Updates an existing monitor's configuration in PostgreSQL."),
 )
 async def update_monitor(
     monitor_id: Annotated[int, Path(..., description="The unique integer ID of the monitor", ge=1)],
@@ -361,10 +350,7 @@ async def delete_monitor(
     "/{monitor_id}/results",
     response_model=list[PingResultRead],
     summary="Get monitor probe results",
-    description=(
-        "Retrieves historical probe and keep-alive results for a monitor, "
-        "ordered most recent first."
-    ),
+    description=("Retrieves historical probe results for a monitor, ordered most recent first."),
 )
 async def get_monitor_results(
     monitor_id: Annotated[int, Path(..., description="The unique integer ID of the monitor", ge=1)],
