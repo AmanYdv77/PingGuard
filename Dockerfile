@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Stage 1: Build & Dependency Wheel Cache
 # ------------------------------------------------------------------------------
-FROM python:3.12-slim AS builder
+FROM python:3.13-slim AS builder
 
 WORKDIR /build
 
@@ -33,7 +33,7 @@ RUN pip install --user --no-cache-dir --require-hashes -r requirements.txt
 # ------------------------------------------------------------------------------
 # Stage 2: Final Minimal Runtime Container
 # ------------------------------------------------------------------------------
-FROM python:3.12-slim AS runtime
+FROM python:3.13-slim AS runtime
 
 WORKDIR /app
 
