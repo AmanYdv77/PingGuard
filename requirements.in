@@ -6,7 +6,7 @@
 # To upgrade dependencies:
 #   uv pip compile --upgrade requirements.in -o requirements.txt --python-version 3.12 --generate-hashes
 
-fastapi>=0.115.0
+fastapi>=0.162.0
 uvicorn[standard]>=0.32.0
 pydantic>=2.9.0
 pydantic-settings>=2.5.0
